@@ -1,3 +1,4 @@
+@tool
 class_name _ModLoaderModHookPreProcessor
 extends RefCounted
 
@@ -13,10 +14,13 @@ const HASH_COLLISION_ERROR := \
 	"MODDING HOOKS ERROR: Hash collision between %s and %s. The collision can be resolved by renaming one of the methods or changing their script's path."
 const MOD_LOADER_HOOKS_START_STRING := \
 	"\n# ModLoader Hooks - The following code has been automatically added by the Godot Mod Loader."
+const ENGINE_VERSION_HEX_4_2_2 := 0x040202
 
+
+static var engine_version_hex: int = Engine.get_version_info().hex
 
 ## finds function names used as setters and getters (excluding inline definitions)
-## group 2 and 4 contain the xetter names
+## group 2 and 4 contain the setter names
 var regex_getter_setter := RegEx.create_from_string("(.*?[sg]et\\s*=\\s*)(\\w+)(\\g<1>)?(\\g<2>)?")
 
 ## finds every instance where super() is called
@@ -30,7 +34,6 @@ var regex_func_body := RegEx.create_from_string("(?smn)\\N*(\\n^(([\\t #]+\\N*)|
 
 ## Just await between word boundaries
 var regex_keyword_await := RegEx.create_from_string("\\bawait\\b")
-
 
 var hashmap := {}
 var script_paths_hooked := {}
@@ -181,7 +184,8 @@ func is_func_async(func_body_text: String) -> bool:
 	var in_multiline_string := false
 	var current_multiline_delimiter := ""
 
-	for line: String in lines:
+	for _line in lines:
+		var line: String = _line
 		var char_index := 0
 		while char_index < line.length():
 			if in_multiline_string:
@@ -310,11 +314,31 @@ func edit_vanilla_method(
 	return text
 
 
-func fix_method_super(method_name: String, func_body: RegExMatch, text: String) -> String:
+func fix_method_super(method_name: String, func_body: RegExMatch, text: String) -> String:	
+	if engine_version_hex < ENGINE_VERSION_HEX_4_2_2:
+		return fix_method_super_before_4_2_2(method_name, func_body, text)
+	
 	return regex_super_call.sub(
 		text, "super.%s" % method_name,
 		true, func_body.get_start(), func_body.get_end()
 	)
+
+
+# https://github.com/godotengine/godot/pull/86052
+# Quote:
+# When the end argument of RegEx.sub was used, 
+# it would truncate the Subject String before even doing the substitution.
+func fix_method_super_before_4_2_2(method_name: String, func_body: RegExMatch, text: String) -> String:
+	var text_after_func_body_end := text.substr(func_body.get_end())
+	
+	text = regex_super_call.sub(
+		text, "super.%s" % method_name,
+		true, func_body.get_start(), func_body.get_end()
+	)
+	
+	text = text + text_after_func_body_end
+	
+	return text
 
 
 static func get_func_body_start_index(func_def_end: int, source_code: String) -> int:
@@ -484,7 +508,7 @@ static func get_hook_check_else_string(
 		)
 
 
-# This function was taken from 
+# This function was taken from
 # https://github.com/godotengine/godot/blob/7e67b496ff7e35f66b88adcbdd5b252d01739cbb/modules/gdscript/tests/scripts/utils.notest.gd#L69
 # It is used instead of type_string because type_string does not exist in Godot 4.1
 static func get_type_name(type: Variant.Type) -> String:
